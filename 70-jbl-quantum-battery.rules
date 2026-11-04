@@ -1,0 +1,3 @@
+# Let the logged-in user read JBL Quantum 2.4 GHz dongles (jbl-quantum-battery).
+# Quantum 810 dongle:
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0ecb", ATTRS{idProduct}=="2069", TAG+="uaccess"

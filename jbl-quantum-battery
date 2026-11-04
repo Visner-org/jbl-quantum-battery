@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""Tray icon with the battery level of a JBL Quantum wireless headset, read from its 2.4 GHz dongle.
+
+Usage:
+  jbl-quantum-battery           tray icon (hidden while the headset is off)
+  jbl-quantum-battery --print   print the level once and exit (no Qt needed)
+
+The dongle keeps the level in HID feature report 0x49 (percent, 5% steps) and the headset link
+in feature report 0x68 (1 = on, 0 = off). It also sends input report 09 <0|1> when the headset
+turns off or on. See README.md for the details.
+"""
+import fcntl, glob, os, sys
+
+__version__ = '0.1.0'
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+VENDOR = 0x0ECB  # Harman
+# 2.4 GHz dongle product id -> (model name, product id of the headset itself over USB cable)
+DONGLES = {
+    0x2069: ('JBL Quantum 810', 0x206A),
+}
+POLL_SECONDS = 10
+
+REPORT_LEVEL = 0x49
+REPORT_LINK = 0x68
+INPUT_LINK_EVENT = 0x09
+
+
+def read_file(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def get_feature(fd, report_id, size=1):
+    buf = bytearray([report_id] + [0] * size)
+    hidiocgfeature = (3 << 30) | (len(buf) << 16) | (ord('H') << 8) | 0x07
+    n = fcntl.ioctl(fd, hidiocgfeature, buf, True)
+    return bytes(buf[1:n])
+
+
+def find_dongle():
+    """Return (hidraw path, model, cable product id) of the first known dongle, or None."""
+    for d in sorted(glob.glob('/sys/class/hidraw/hidraw*')):
+        uevent = read_file(d + '/device/uevent') or ''
+        for pid, (model, cable_pid) in DONGLES.items():
+            if f'HID_ID=0003:{VENDOR:08X}:{pid:08X}' in uevent:
+                return '/dev/' + os.path.basename(d), model, cable_pid
+    return None
+
+
+def usb_present(vendor, product):
+    for d in glob.glob('/sys/bus/usb/devices/*/idProduct'):
+        if read_file(d) == f'{product:04x}' and read_file(os.path.dirname(d) + '/idVendor') == f'{vendor:04x}':
+            return True
+    return False
+
+
+def read_state(fd):
+    """(headset on, level %) from an open dongle."""
+    on = get_feature(fd, REPORT_LINK)[:1] == b'\x01'
+    level = get_feature(fd, REPORT_LEVEL)[0]
+    return on, level
+
+
+def print_once():
+    found = find_dongle()
+    if not found:
+        print('No supported JBL dongle found.', file=sys.stderr)
+        return 1
+    path, model, _ = found
+    try:
+        fd = os.open(path, os.O_RDWR)
+    except PermissionError:
+        print(f'No permission to open {path}; install the udev rule (see README).', file=sys.stderr)
+        return 1
+    on, level = read_state(fd)
+    os.close(fd)
+    if not on:
+        print(f'{model}: off')
+        return 2
+    print(f'{model}: {level}%')
+    return 0
+
+
+def run_tray():
+    from PyQt6.QtCore import Qt, QTimer, QSocketNotifier, QRectF
+    from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
+    from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+
+    def make_icon(level, plugged, text_color):
+        pm = QPixmap(64, 64)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if plugged:
+            bar = QColor('#3daee9')
+        elif level <= 15:
+            bar = QColor('#da4453')
+        elif level <= 30:
+            bar = QColor('#f67400')
+        else:
+            bar = QColor('#27ae60')
+        f = QFont()
+        f.setBold(True)
+        f.setPixelSize(30 if level >= 100 else 42)
+        p.setFont(f)
+        p.setPen(text_color)
+        p.drawText(QRectF(0, 0, 64, 50), Qt.AlignmentFlag.AlignCenter, str(level))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(text_color.red(), text_color.green(), text_color.blue(), 70))
+        p.drawRoundedRect(QRectF(2, 50, 60, 12), 3, 3)
+        p.setBrush(bar)
+        p.drawRoundedRect(QRectF(2, 50, max(6, 60 * level / 100), 12), 3, 3)
+        p.end()
+        return QIcon(pm)
+
+    class Tray:
+        def __init__(self, app):
+            self.app = app
+            self.fd = None
+            self.notifier = None
+            self.dongle = None
+            self.state = None
+            self.shown = None
+            self.tray = QSystemTrayIcon()
+            menu = QMenu()
+            menu.addAction('Quit', app.quit)
+            self.tray.setContextMenu(menu)
+            self.timer = QTimer()
+            self.timer.timeout.connect(self.tick)
+            self.timer.start(POLL_SECONDS * 1000)
+            self.tick()
+
+        def open_dev(self):
+            self.dongle = find_dongle()
+            if not self.dongle:
+                return
+            try:
+                self.fd = os.open(self.dongle[0], os.O_RDWR | os.O_NONBLOCK)
+            except OSError:
+                return  # no permission (udev rule missing) or unplugged again
+            self.notifier = QSocketNotifier(self.fd, QSocketNotifier.Type.Read)
+            self.notifier.activated.connect(self.on_input)
+
+        def close_dev(self):
+            if self.notifier:
+                self.notifier.setEnabled(False)
+                self.notifier = None
+            if self.fd is not None:
+                os.close(self.fd)
+                self.fd = None
+
+        def on_input(self):
+            link_changed = False
+            while True:
+                try:
+                    d = os.read(self.fd, 64)
+                except BlockingIOError:
+                    break
+                except OSError:
+                    self.close_dev()  # dongle unplugged
+                    break
+                if d[:1] == bytes([INPUT_LINK_EVENT]):
+                    link_changed = True
+            if link_changed or self.fd is None:
+                self.tick()
+
+        def tick(self):
+            if self.fd is None:
+                self.open_dev()
+            self.state = None
+            if self.fd is not None:
+                try:
+                    on, level = read_state(self.fd)
+                    if on and level <= 100:
+                        self.state = (level, usb_present(VENDOR, self.dongle[2]))
+                except OSError:
+                    self.close_dev()
+            self.update()
+
+        def update(self):
+            if self.state is None:
+                if self.shown is not False:
+                    self.tray.hide()
+                    self.shown = False
+                return
+            if self.shown != self.state:
+                level, plugged = self.state
+                text = self.app.palette().windowText().color()
+                self.tray.setIcon(make_icon(level, plugged, text))
+                self.tray.setToolTip(f'{self.dongle[1]}: {level}%' + (' (plugged in)' if plugged else ''))
+                self.tray.show()
+                self.shown = self.state
+
+    app = QApplication(sys.argv)
+    app.setApplicationName('jbl-quantum-battery')
+    app.setQuitOnLastWindowClosed(False)
+    tray = Tray(app)  # noqa: F841
+    return app.exec()
+
+
+def main():
+    args = sys.argv[1:]
+    if '--version' in args:
+        print(__version__)
+        return 0
+    if '--print' in args:
+        return print_once()
+    if args and args[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return 0
+    return run_tray()
+
+
+if __name__ == '__main__':
+    sys.exit(main())
