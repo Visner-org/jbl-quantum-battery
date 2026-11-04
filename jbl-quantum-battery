@@ -11,7 +11,7 @@ turns off or on. See README.md for the details.
 """
 import fcntl, glob, os, sys
 
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 VENDOR = 0x0ECB  # Harman
@@ -198,6 +198,7 @@ def run_tray():
     app = QApplication(sys.argv)
     app.setApplicationName('jbl-quantum-battery')
     app.setQuitOnLastWindowClosed(False)
+    app.setQuitLockEnabled(False)  # Qt 6 quits when the only tray icon hides (headset off)
     tray = Tray(app)  # noqa: F841
     return app.exec()
 
