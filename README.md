@@ -6,7 +6,7 @@ On Linux, the dongle doesn't report the battery in a way the system understands,
 
 The icon shows the percent with a bar under it:
 - green above 30%, orange from 16 to 30%, red at 15% or below
-- blue while the headset's USB cable is plugged into the same PC
+- blue, with a yellow lightning bolt, while the headset's USB cable is plugged into the same PC
 
 It hides while the headset is off. Hover for the tooltip, and right-click to quit.
 
