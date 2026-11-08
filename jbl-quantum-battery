@@ -11,7 +11,7 @@ turns off or on. See README.md for the details.
 """
 import fcntl, glob, os, sys
 
-__version__ = '0.1.1'
+__version__ = '0.1.3'
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 VENDOR = 0x0ECB  # Harman
