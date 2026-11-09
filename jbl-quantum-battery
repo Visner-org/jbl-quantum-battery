@@ -9,9 +9,9 @@ The dongle keeps the level in HID feature report 0x49 (percent, 5% steps) and th
 in feature report 0x68 (1 = on, 0 = off). It also sends input report 09 <0|1> when the headset
 turns off or on. See README.md for the details.
 """
-import fcntl, glob, os, sys
+import fcntl, glob, os, sys, time
 
-__version__ = '0.1.4'
+__version__ = '0.1.5'
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 VENDOR = 0x0ECB  # Harman
@@ -20,6 +20,7 @@ DONGLES = {
     0x2069: ('JBL Quantum 810', 0x206A),
 }
 POLL_SECONDS = 10
+STALL_SECONDS = 30 * 60  # no 5% step for this long while plugged in = not charging
 
 REPORT_LEVEL = 0x49
 REPORT_LINK = 0x68
@@ -136,6 +137,9 @@ def run_tray():
             self.dongle = None
             self.state = None
             self.shown = None
+            self.was_plugged = False
+            self.last_level = None
+            self.last_rise = 0.0
             self.tray = QSystemTrayIcon()
             menu = QMenu()
             menu.addAction('Quit', app.quit)
@@ -187,10 +191,21 @@ def run_tray():
                 try:
                     on, level = read_state(self.fd)
                     if on and level <= 100:
-                        self.state = (level, usb_present(VENDOR, self.dongle[2]))
+                        self.state = (level, self.is_charging(level, usb_present(VENDOR, self.dongle[2])))
                 except OSError:
                     self.close_dev()
             self.update()
+
+        def is_charging(self, level, plugged):
+            """Plugged in, below 100%, and the level went up within the last 30 minutes."""
+            now = time.monotonic()
+            if not plugged:
+                self.was_plugged = False
+            elif not self.was_plugged or (self.last_level is not None and level > self.last_level):
+                self.last_rise = now  # just plugged in, or a new 5% step
+                self.was_plugged = True
+            self.last_level = level
+            return plugged and level < 100 and now - self.last_rise < STALL_SECONDS
 
         def update(self):
             if self.state is None:
@@ -199,10 +214,10 @@ def run_tray():
                     self.shown = False
                 return
             if self.shown != self.state:
-                level, plugged = self.state
+                level, plugged = self.state  # plugged = charging
                 text = self.app.palette().windowText().color()
                 self.tray.setIcon(make_icon(level, plugged, text))
-                self.tray.setToolTip(f'{self.dongle[1]}: {level}%' + (' (plugged in)' if plugged else ''))
+                self.tray.setToolTip(f'{self.dongle[1]}: {level}%' + (' (charging)' if plugged else ''))
                 self.tray.show()
                 self.shown = self.state
 
