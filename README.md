@@ -52,6 +52,12 @@ When the headset's USB cable is plugged into the PC, the headset shows up as a s
 
 Not affiliated with JBL or Harman.
 
+## Checking the icon (monitor)
+
+`tools/monitor.py` reads the dongle and the real tray icon every 10 s, works out on its own whether the bolt should show, and logs changes and any `MISMATCH` to `~/jbl-monitor.log`. It only reads.
+
+Run it in the background with `systemd-run --user --unit=jbl-monitor python3 -u tools/monitor.py`, stop it with `systemctl --user stop jbl-monitor`. First real charging test of v0.1.5: 2026-11-09 (started 2026-11-08, unplugged at 100%).
+
 ## License
 
 GPL-3.0. See `LICENSE`.
