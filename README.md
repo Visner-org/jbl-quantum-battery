@@ -50,6 +50,14 @@ The app reads `0x68` and `0x49` every 10 seconds. It also reacts right away to `
 
 When the headset's USB cable is plugged into the PC, the headset shows up as a separate device (`0ecb:206a` for the 810). It refuses these reads over the cable, so the app only uses it to show the "plugged in" color.
 
+## Log
+
+The app writes a line to the journal when the headset turns on or off, the battery moves a 5% step, or the dongle comes or goes. To see why the headset dropped out:
+
+```
+journalctl --user -u jbl-quantum-battery
+```
+
 Not affiliated with JBL or Harman.
 
 ## Checking the icon (monitor)

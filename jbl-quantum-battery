@@ -11,7 +11,7 @@ turns off or on. See README.md for the details.
 """
 import fcntl, glob, os, sys, time
 
-__version__ = '0.1.5'
+__version__ = '0.1.6'
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 VENDOR = 0x0ECB  # Harman
@@ -25,6 +25,10 @@ STALL_SECONDS = 30 * 60  # no 5% step for this long while plugged in = not charg
 REPORT_LEVEL = 0x49
 REPORT_LINK = 0x68
 INPUT_LINK_EVENT = 0x09
+
+
+def log(msg):
+    print(msg, flush=True)  # the systemd service sends this to the journal
 
 
 def read_file(path):
@@ -140,6 +144,7 @@ def run_tray():
             self.was_plugged = False
             self.last_level = None
             self.last_rise = 0.0
+            self.logged = None
             self.tray = QSystemTrayIcon()
             menu = QMenu()
             menu.addAction('Quit', app.quit)
@@ -180,6 +185,7 @@ def run_tray():
                     break
                 if d[:1] == bytes([INPUT_LINK_EVENT]):
                     link_changed = True
+                    log(f'dongle says headset turned {"on" if d[1:2] == b"\x01" else "off"}')
             if link_changed or self.fd is None:
                 self.tick()
 
@@ -194,7 +200,20 @@ def run_tray():
                         self.state = (level, self.is_charging(level, usb_present(VENDOR, self.dongle[2])))
                 except OSError:
                     self.close_dev()
+            self.log_state()
             self.update()
+
+        def log_state(self):
+            """One journal line per change, so drop-outs can be looked up later."""
+            if self.fd is None:
+                now = 'dongle not found'
+            elif self.state is None:
+                now = 'headset off'
+            else:
+                now = f'headset on, {self.state[0]}%' + (', charging' if self.state[1] else '')
+            if now != self.logged:
+                log(now)
+                self.logged = now
 
         def is_charging(self, level, plugged):
             """Plugged in, below 100%, and the level went up within the last 30 minutes."""
