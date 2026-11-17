@@ -15,6 +15,7 @@ It hides while the headset is off. Hover for the tooltip, and right-click to qui
 | Headset | Dongle USB ID | Status |
 |---|---|---|
 | JBL Quantum 810 Wireless | `0ecb:2069` | tested |
+| JBL Quantum 910 Wireless | `0ecb:2088` | tested |
 
 Other JBL Quantum wireless headsets may speak the same protocol. If yours has a different dongle ID, run `lsusb | grep 0ecb` and open an issue with the output. You can also try adding the ID to `DONGLES` in the script and to the udev rule.
 

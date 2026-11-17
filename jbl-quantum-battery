@@ -18,6 +18,7 @@ VENDOR = 0x0ECB  # Harman
 # 2.4 GHz dongle product id -> (model name, product id of the headset itself over USB cable)
 DONGLES = {
     0x2069: ('JBL Quantum 810', 0x206A),
+    0x2088: ('JBL Quantum 910', 0x2089),
 }
 POLL_SECONDS = 10
 STALL_SECONDS = 30 * 60  # no 5% step for this long while plugged in = not charging
